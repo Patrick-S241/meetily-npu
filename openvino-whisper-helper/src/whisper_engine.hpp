@@ -8,7 +8,7 @@ namespace ov::genai { class WhisperPipeline; }
 namespace meetily::openvino_whisper {
 class WhisperEngine {
 public:
-    WhisperEngine() = default;
+    WhisperEngine();
     ~WhisperEngine();
     void load(const std::string& model_path, const std::string& model_id, const std::string& cache_dir);
     void unload();

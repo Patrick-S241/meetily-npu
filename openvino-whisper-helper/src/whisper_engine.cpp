@@ -7,6 +7,7 @@
 #include <stdexcept>
 
 namespace meetily::openvino_whisper {
+WhisperEngine::WhisperEngine() = default;
 WhisperEngine::~WhisperEngine() = default;
 void WhisperEngine::load(const std::string& model_path, const std::string& model_id, const std::string& cache_dir) {
     if (model_path.empty() || model_id.empty() || cache_dir.empty()) throw std::invalid_argument("load_model requires model_path, model_id, and cache_dir");
