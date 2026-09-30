@@ -34,7 +34,7 @@ struct FileSpec { path: String, size: u64, sha256: String }
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ModelInfo { pub id:String, pub display_name:String, pub revision:String, pub language:String, pub installed:bool, pub ready:bool, pub total_bytes:Option<u64>, pub downloaded_bytes:Option<u64>, pub reason:Option<String> }
-#[derive(Serialize)]
+#[derive(Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Progress { pub model_id:String, pub phase:String, pub downloaded_bytes:u64, pub total_bytes:Option<u64>, pub progress:Option<u8>, pub message:Option<String> }
 #[derive(Serialize)]
