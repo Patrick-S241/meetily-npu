@@ -70,7 +70,11 @@ bool read_request(std::istream& input, Request& request, ProtocolError& error) {
     for (float sample : request.audio) if (!std::isfinite(sample) || sample < -1.1F || sample > 1.1F) { error = {"IPC_PROTOCOL_ERROR", "audio samples must be finite normalized f32 values"}; return false; }
     return true;
 }
-std::string serialize_response(const Response& response) { return response_json(response).dump(); }
+std::string serialize_response(const Response& response) {
+    // Native exception strings may contain invalid UTF-8 from Windows paths.
+    // Keep the IPC frame valid instead of terminating the helper on serialization.
+    return response_json(response).dump(-1, ' ', false, json::error_handler_t::replace);
+}
 bool write_response(std::ostream& output, const Response& response, ProtocolError& error) {
     const std::string serialized = serialize_response(response);
     if (serialized.size() > kMaxResponseBytes) { error = {"IPC_PROTOCOL_ERROR", "response exceeds protocol limit"}; return false; }

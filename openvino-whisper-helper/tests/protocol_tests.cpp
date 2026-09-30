@@ -27,6 +27,10 @@ void test_rejects_missing_audio_and_oversize_header() {
 void test_response_serialization() {
     mw::Response probe; probe.id = 3; probe.ok = true; probe.device = "NPU"; probe.npu_name = "Intel NPU"; probe.available_devices = {"CPU", "NPU"}; const auto json = mw::serialize_response(probe); assert(json.find("\"available_devices\":[\"CPU\",\"NPU\"]") != std::string::npos);
     const auto error = mw::error_response(3, "MODEL_NOT_FOUND", "missing"); const auto error_json = mw::serialize_response(error); assert(error_json.find("MODEL_NOT_FOUND") != std::string::npos);
+    const auto invalid = mw::error_response(4, "NPU_COMPILE_FAILED", std::string("path: ") + static_cast<char>(0xC3));
+    const auto invalid_json = mw::serialize_response(invalid);
+    assert(invalid_json.find("NPU_COMPILE_FAILED") != std::string::npos);
+    assert(invalid_json.find("\xEF\xBF\xBD") != std::string::npos);
 }
 } // namespace
 int main() { test_valid_transcribe(); test_rejects_version_and_rate(); test_rejects_missing_audio_and_oversize_header(); test_response_serialization(); }

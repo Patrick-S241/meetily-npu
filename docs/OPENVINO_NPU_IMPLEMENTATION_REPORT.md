@@ -9,11 +9,11 @@
 
 ## Architecture
 
-Meetily's existing 16 kHz mono `f32` chunks enter `TranscriptionEngine::Provider`. `OpenVinoWhisperProvider` holds a persistent Rust client and one native C++ helper. Versioned, length-framed JSON headers carry metadata and binary little-endian `f32` payloads carry audio. The helper owns one `ov::genai::WhisperPipeline` and compiles it with the literal device `NPU`. It reuses the pipeline across recording chunks and batch segments. There is no OpenVINO `AUTO` target or CPU/GPU retry. A missing device or failed NPU compilation returns an error.
+Meetily's existing 16 kHz mono `f32` chunks enter `TranscriptionEngine::Provider`. `OpenVinoWhisperProvider` holds a persistent Rust client and one native C++ helper. Versioned, length-framed JSON headers carry metadata and binary little-endian `f32` payloads carry audio. The helper owns one `ov::genai::WhisperPipeline` and compiles Whisper encoder and decoder with the literal device `NPU`. GenAI compiles the pipeline's tokenizer and detokenizer on CPU, so its CPU plugin is bundled for that required preprocessing and postprocessing. It reuses the pipeline across recording chunks and batch segments. There is no OpenVINO `AUTO` target or CPU/GPU retry for Whisper inference. A missing device or failed NPU compilation returns an error.
 
 Model files live in application data under `models/openvino/<model>/<revision>`. The manifest pins every required file by size and SHA-256. Downloads use a staging directory, retries, verification, and an atomic directory swap. Per-model locks serialize model operations, and deletion refuses to remove a model used by a provider. The compilation cache is scoped by Runtime version, model, and revision.
 
-Windows CI fetches and hashes the official GenAI SDK archive, builds and tests the helper with MSVC/CMake, and bundles the helper as a Tauri sidecar. It copies Core, GenAI, Tokenizers, IR frontend, the NPU plugin/compiler/VM runtime, TBB, and license notices into `openvino-runtime`. The helper launch prepends this directory to `PATH`. CPU, GPU, and AUTO plugins are excluded. CI additionally extracts the MSI and sends a `probe` request to the packaged helper using the packaged DLLs. Installed users need neither Python nor a separate OpenVINO installation.
+Windows CI fetches and hashes the official GenAI SDK archive, builds and tests the helper with MSVC/CMake, and bundles the helper as a Tauri sidecar. It copies Core, GenAI, Tokenizers, IR frontend, the CPU plugin required by GenAI tokenizer/detokenizer, the NPU plugin/compiler/VM runtime, TBB, and license notices into `openvino-runtime`. The helper launch prepends this directory to `PATH`. GPU and AUTO plugins are excluded; the CPU plugin is not a fallback target for Whisper inference. CI additionally extracts the MSI and sends a `probe` request to the packaged helper using the packaged DLLs. Installed users need neither Python nor a separate OpenVINO installation.
 
 ## Files
 
@@ -80,7 +80,7 @@ Add Windows Intel NPU transcription using OpenVINO GenAI Whisper Base/Small INT8
 
 - Pin OpenVINO GenAI 2026.4.0.0 and immutable OpenVINO Whisper model revisions with per-file SHA-256 validation.
 - Add binary framed helper IPC, provider lifecycle management, NPU probing, model downloads, settings UI, and diagnostics.
-- Bundle the NPU-only OpenVINO runtime in the Windows installer and inspect/probe the packaged MSI in CI.
+- Bundle the OpenVINO runtime required for NPU Whisper inference, including the CPU tokenizer/detokenizer plugin, and inspect/probe the packaged MSI in CI.
 
 ### Verification
 

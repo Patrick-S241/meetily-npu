@@ -2,14 +2,20 @@
 #include "protocol.hpp"
 #include "whisper_engine.hpp"
 
+#include <algorithm>
 #include <chrono>
 #include <exception>
 #include <iostream>
+#include <utility>
 
 namespace mw = meetily::openvino_whisper;
 namespace {
 mw::Response probe_response(std::uint64_t id) {
     const auto probe = mw::probe_npu();
+    // GenAI runs Whisper's tokenizer and detokenizer on CPU even when the
+    // encoder and decoder are compiled for the explicitly selected NPU.
+    if (std::find(probe.available_devices.begin(), probe.available_devices.end(), "CPU") == probe.available_devices.end())
+        return mw::error_response(id, "RUNTIME_INCOMPLETE", "Bundled OpenVINO CPU plugin is missing. GenAI requires it for tokenization; Whisper inference remains on NPU.");
     if (!probe.npu_available) return mw::error_response(id, "NPU_NOT_AVAILABLE", "Intel NPU is unavailable. Update the Intel NPU driver through its OEM or Intel-supported channel.");
     mw::Response response; response.id = id; response.ok = true; response.device = "NPU"; response.npu_name = probe.npu_name; response.openvino_version = probe.openvino_version; response.available_devices = probe.available_devices; return response;
 }
@@ -42,7 +48,16 @@ int main() {
             else if (request.op == "transcribe") { const auto start = std::chrono::steady_clock::now(); const auto text = engine.transcribe(request.audio, request.language, request.task); response.id = request.id; response.ok = true; response.text = text; response.model = engine.model_id(); response.device = "NPU"; response.inference_ms = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - start).count(); }
             else if (request.op == "shutdown") { engine.unload(); response.id = request.id; response.ok = true; response.device = "NPU"; mw::ProtocolError write_error; mw::write_response(std::cout, response, write_error); return 0; }
             else response = mw::error_response(request.id, "IPC_PROTOCOL_ERROR", "unsupported operation");
-        } catch (const std::exception& e) { std::cerr << "openvino-whisper-helper: request " << request.id << " failed: " << e.what() << '\n'; const auto code = request.op == "transcribe" ? "TRANSCRIPTION_FAILED" : classify_exception(e); response = mw::error_response(request.id, code, "OpenVINO NPU operation failed. Check the model/runtime compatibility and Intel NPU driver."); }
+        } catch (const std::exception& e) {
+            std::cerr << "openvino-whisper-helper: request " << request.id << " failed: " << e.what() << '\n';
+            const auto code = request.op == "transcribe" ? "TRANSCRIPTION_FAILED" : classify_exception(e);
+            std::string message = "OpenVINO NPU operation failed. Check the model/runtime compatibility and Intel NPU driver.";
+            if (request.op == "load_model") {
+                message = e.what();
+                if (message.size() > 2048) message.resize(2048);
+            }
+            response = mw::error_response(request.id, code, std::move(message));
+        }
         mw::ProtocolError write_error;
         if (!mw::write_response(std::cout, response, write_error)) { std::cerr << "openvino-whisper-helper: " << write_error.message << '\n'; return 3; }
     }

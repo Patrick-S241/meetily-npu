@@ -1,8 +1,10 @@
 # OpenVINO Whisper NPU helper
 
 `openvino-whisper-helper` is Meetily's persistent Windows sidecar for local
-OpenVINO GenAI Whisper transcription. It only targets `NPU`; it never requests
-`AUTO`, CPU, GPU, HETERO, or another fallback device.
+OpenVINO GenAI Whisper transcription. The Whisper encoder and decoder target
+`NPU`; they never request `AUTO`, CPU, GPU, HETERO, or another fallback device.
+GenAI compiles the tokenizer and detokenizer on CPU, so the matching OpenVINO
+CPU plugin must also be bundled.
 
 ## Version and build
 

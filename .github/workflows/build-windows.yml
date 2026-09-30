@@ -728,6 +728,9 @@ jobs:
             'openvino_genai.dll',
             'openvino_tokenizers.dll',
             'openvino_ir_frontend.dll',
+            # OpenVINO GenAI compiles Whisper tokenization on CPU. Encoder and
+            # decoder execution remain explicitly targeted to the NPU.
+            'openvino_intel_cpu_plugin.dll',
             'openvino_intel_npu_plugin.dll',
             'openvino_intel_npu_compiler_loader.dll',
             'openvino_intel_npu_compiler.dll',
@@ -746,8 +749,9 @@ jobs:
           Copy-Item -LiteralPath (Join-Path $sdk 'docs/licensing/LICENSE-GENAI') -Destination $runtimeDir
           Copy-Item -LiteralPath (Join-Path $sdk 'docs/openvino_tokenizers/LICENSE') -Destination (Join-Path $runtimeDir 'LICENSE-TOKENIZERS')
 
-          # NPU execution remains explicit in the helper; no AUTO/CPU/GPU plugin is bundled here.
-          $forbidden = @('openvino_auto_plugin.dll', 'openvino_intel_cpu_plugin.dll', 'openvino_intel_gpu_plugin.dll')
+          # Whisper inference remains explicitly targeted to the NPU. The CPU
+          # plugin above exists only because GenAI tokenizes/detokenizes on CPU.
+          $forbidden = @('openvino_auto_plugin.dll', 'openvino_intel_gpu_plugin.dll')
           foreach ($dll in $forbidden) {
             if (Test-Path -LiteralPath (Join-Path $runtimeDir $dll)) { throw "Unexpected fallback plugin in NPU bundle: $dll" }
           }
@@ -826,10 +830,11 @@ jobs:
             (Join-Path $helper.DirectoryName 'resources/openvino-runtime')
           )
           if ($runtime.FullName -notin $runtimeCandidates) { throw "Packaged runtime is not discoverable next to the helper: $($runtime.FullName)" }
-          foreach ($name in @('openvino.dll', 'openvino_genai.dll', 'openvino_tokenizers.dll', 'openvino_intel_npu_plugin.dll', 'tbb12.dll')) {
+          foreach ($name in @('openvino.dll', 'openvino_genai.dll', 'openvino_tokenizers.dll', 'openvino_intel_cpu_plugin.dll', 'openvino_intel_npu_plugin.dll', 'tbb12.dll')) {
             if (-not (Test-Path -LiteralPath (Join-Path $runtime.FullName $name))) { throw "Packaged OpenVINO runtime missing $name" }
           }
-          # Exercise the packaged binary and DLL set on a runner without NPU hardware.
+          # The helper checks CPU tokenization before NPU availability. On this
+          # NPU-less runner, NPU_NOT_AVAILABLE proves the packaged CPU plugin loads.
           $start = [System.Diagnostics.ProcessStartInfo]::new()
           $start.FileName = $helper.FullName
           $start.UseShellExecute = $false
