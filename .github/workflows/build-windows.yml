@@ -778,10 +778,12 @@ jobs:
           projectPath: frontend
           args: --target x86_64-pc-windows-msvc --features vulkan ${{ steps.build-profile.outputs.args }} ${{ steps.windows-portability.outputs.args }}
 
-      - name: Test Windows Rust transcription integration
+      - name: Test Windows OpenVINO Rust integration
         shell: pwsh
         run: |
-          cargo test --manifest-path frontend/src-tauri/Cargo.toml --target x86_64-pc-windows-msvc --features vulkan --lib
+          # The hosted runner has no audio output device or Intel NPU. Run the
+          # OpenVINO protocol/model/provider unit tests without hardware tests.
+          cargo test --manifest-path frontend/src-tauri/Cargo.toml --target x86_64-pc-windows-msvc --features vulkan --lib audio::transcription::openvino_
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
       - name: Verify build artifacts

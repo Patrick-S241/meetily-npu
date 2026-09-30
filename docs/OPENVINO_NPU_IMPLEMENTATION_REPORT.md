@@ -25,7 +25,7 @@ Windows CI fetches and hashes the official GenAI SDK archive, builds and tests t
 
 ## Build and test
 
-The Windows CI workflow contains the pinned SDK download, hash check, CMake build, `ctest`, Tauri build, Rust tests, MSI extraction, and packaged-helper probe. Local helper build commands are in [INTEL_NPU_TRANSCRIPTION.md](INTEL_NPU_TRANSCRIPTION.md#build-and-package-on-windows). The Rust command is `cargo test --manifest-path frontend/src-tauri/Cargo.toml --target x86_64-pc-windows-msvc --features vulkan --lib`; the frontend type check is `cd frontend; .\\node_modules\\.bin\\tsc.CMD --noEmit`.
+The Windows CI workflow contains the pinned SDK download, hash check, CMake build, `ctest`, Tauri build, OpenVINO Rust tests, MSI extraction, and packaged-helper probe. Local helper build commands are in [INTEL_NPU_TRANSCRIPTION.md](INTEL_NPU_TRANSCRIPTION.md#build-and-package-on-windows). The hardware-free Rust command is `cargo test --manifest-path frontend/src-tauri/Cargo.toml --target x86_64-pc-windows-msvc --features vulkan --lib audio::transcription::openvino_`; the frontend type check is `cd frontend; .\\node_modules\\.bin\\tsc.CMD --noEmit`. Run the full Rust suite on a machine with an audio output device.
 
 Results in this workspace:
 
