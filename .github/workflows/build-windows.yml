@@ -786,6 +786,19 @@ jobs:
           cargo test --manifest-path frontend/src-tauri/Cargo.toml --target x86_64-pc-windows-msvc --features vulkan --lib audio::transcription::openvino_
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
+      - name: Verify Windows application stack reserve
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $exe = 'target/x86_64-pc-windows-msvc/${{ steps.build-profile.outputs.profile }}/meetily.exe'
+          $bytes = [System.IO.File]::ReadAllBytes((Resolve-Path -LiteralPath $exe).Path)
+          $peOffset = [System.BitConverter]::ToInt32($bytes, 0x3c)
+          $optionalHeader = $peOffset + 24
+          if ([System.BitConverter]::ToUInt16($bytes, $optionalHeader) -ne 0x20b) { throw 'Expected a PE32+ executable' }
+          $reserve = [System.BitConverter]::ToUInt64($bytes, $optionalHeader + 72)
+          if ($reserve -ne 8388608) { throw "Unexpected meetily.exe stack reserve: $reserve bytes (expected 8388608)" }
+          Write-Host "meetily.exe stack reserve: $reserve bytes"
+
       - name: Verify build artifacts
         shell: bash
         run: |

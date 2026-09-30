@@ -4,6 +4,15 @@ mod ffmpeg;
 mod onnxruntime;
 
 fn main() {
+    // Tauri's Windows command dispatcher can require a large stack frame.
+    // The default 1 MiB thread stack is insufficient when commands are invoked
+    // from a WebView callback, which otherwise terminates the process in __chkstk.
+    if std::env::var("CARGO_CFG_TARGET_OS").as_deref() == Ok("windows")
+        && std::env::var("CARGO_CFG_TARGET_ENV").as_deref() == Ok("msvc")
+    {
+        println!("cargo:rustc-link-arg-bin=meetily=/STACK:8388608");
+    }
+
     // GPU Acceleration Detection and Build Guidance
     detect_and_report_gpu_capabilities();
 
