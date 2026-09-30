@@ -8,6 +8,8 @@ use crate::config::{DEFAULT_WHISPER_MODEL, DEFAULT_PARAKEET_MODEL};
 use crate::parakeet_engine::ParakeetEngine;
 use crate::state::AppState;
 use crate::whisper_engine::WhisperEngine;
+#[cfg(target_os = "windows")]
+use crate::audio::transcription::TranscriptionProvider;
 use anyhow::{anyhow, Result};
 use log::{debug, error, info, warn};
 use serde::{Deserialize, Serialize};
@@ -102,11 +104,11 @@ pub async fn start_retranscription<R: Runtime>(
     // Reset cancellation flag
     RETRANSCRIPTION_CANCELLED.store(false, Ordering::SeqCst);
 
-    let use_parakeet = provider.as_deref() == Some("parakeet");
+    let provider_for_cleanup = provider.clone();
     let result = run_retranscription(app.clone(), meeting_id.clone(), meeting_folder_path, language, model, provider).await;
 
     // Unload the engine after the batch job (success, failure, or cancellation)
-    super::common::unload_engine_after_batch(use_parakeet).await;
+    super::common::unload_engine_after_batch(provider_for_cleanup.as_deref()).await;
 
     // Guard will automatically clear flag on drop
     // No need for manual: RETRANSCRIPTION_IN_PROGRESS.store(false, Ordering::SeqCst);
@@ -183,6 +185,14 @@ async fn run_retranscription<R: Runtime>(
 
     // Determine which provider to use (default to whisper)
     let use_parakeet = provider.as_deref() == Some("parakeet");
+    let use_openvino = provider.as_deref() == Some("openvinoWhisper");
+
+    // Retranscription may bypass provider validation; report the platform
+    // limitation directly instead of attempting to use a Whisper engine.
+    #[cfg(not(target_os = "windows"))]
+    if use_openvino {
+        return Err(anyhow!("Intel NPU transcription is available on Windows only"));
+    }
 
     info!(
         "Starting retranscription for meeting {} with language {:?}, model {:?}, provider {:?}",
@@ -300,13 +310,28 @@ async fn run_retranscription<R: Runtime>(
     emit_progress(&app, &meeting_id, "transcribing", 25, "Loading transcription engine...");
 
     // Initialize the appropriate engine once (not per-segment)
-    let whisper_engine = if !use_parakeet {
+    let whisper_engine = if !use_parakeet && !use_openvino {
         Some(get_or_init_whisper(&app, model.as_deref()).await?)
     } else {
         None
     };
     let parakeet_engine = if use_parakeet {
         Some(get_or_init_parakeet(&app, model.as_deref()).await?)
+    } else {
+        None
+    };
+    // Load the NPU model once before segment processing. The provider retains
+    // its persistent helper and compiled model for this entire batch.
+    #[cfg(target_os = "windows")]
+    let openvino_provider = if use_openvino {
+        Some(
+            crate::audio::transcription::engine::get_or_init_openvino(
+                &app,
+                model.as_deref().unwrap_or("whisper-small-int8"),
+            )
+            .await
+            .map_err(|e| anyhow!("OpenVINO transcription initialization failed: {}", e))?,
+        )
     } else {
         None
     };
@@ -376,6 +401,21 @@ async fn run_retranscription<R: Runtime>(
                 .await
                 .map_err(|e| anyhow!("Parakeet transcription failed on segment {}: {}", i, e))?;
             (text, 0.9f32)
+        } else if use_openvino {
+            #[cfg(target_os = "windows")]
+            {
+                let result = openvino_provider
+                    .as_ref()
+                    .expect("OpenVINO provider is initialized for this batch")
+                    .transcribe(segment.samples.clone(), language.clone())
+                    .await
+                    .map_err(|e| anyhow!("OpenVINO transcription failed on segment {}: {}", i, e))?;
+                (result.text, result.confidence.unwrap_or(0.0))
+            }
+            #[cfg(not(target_os = "windows"))]
+            {
+                return Err(anyhow!("Intel NPU transcription is available on Windows only"));
+            }
         } else {
             let engine = whisper_engine.as_ref().unwrap();
             let (text, conf, _) = engine

@@ -1,8 +1,14 @@
 {
   "bundle": {
+    "externalBin": [
+      "binaries/llama-helper",
+      "binaries/ffmpeg",
+      "binaries/openvino-whisper-helper"
+    ],
     "resources": {
       "templates": "templates",
-      "binaries/onnxruntime": "."
+      "binaries/onnxruntime": ".",
+      "binaries/openvino-runtime": "openvino-runtime"
     }
   }
 }

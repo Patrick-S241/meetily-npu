@@ -7,6 +7,8 @@ use crate::config::{DEFAULT_WHISPER_MODEL, DEFAULT_PARAKEET_MODEL};
 use crate::parakeet_engine::ParakeetEngine;
 use crate::state::AppState;
 use crate::whisper_engine::WhisperEngine;
+#[cfg(target_os = "windows")]
+use crate::audio::transcription::TranscriptionProvider;
 use anyhow::{anyhow, Result};
 use log::{debug, error, info, warn};
 use serde::{Deserialize, Serialize};
@@ -266,7 +268,7 @@ pub async fn start_import<R: Runtime>(
     // Reset cancellation flag
     IMPORT_CANCELLED.store(false, Ordering::SeqCst);
 
-    let use_parakeet = provider.as_deref() == Some("parakeet");
+    let provider_for_cleanup = provider.clone();
     let result = run_import(
         app.clone(),
         source_path,
@@ -278,7 +280,7 @@ pub async fn start_import<R: Runtime>(
     .await;
 
     // Unload the engine after the batch job (success, failure, or cancellation)
-    super::common::unload_engine_after_batch(use_parakeet).await;
+    super::common::unload_engine_after_batch(provider_for_cleanup.as_deref()).await;
 
     // Guard will automatically clear flag on drop
     // No need for manual: IMPORT_IN_PROGRESS.store(false, Ordering::SeqCst);
@@ -331,6 +333,15 @@ async fn run_import<R: Runtime>(
 
     // Determine which provider to use (default to whisper)
     let use_parakeet = provider.as_deref() == Some("parakeet");
+    let use_openvino = provider.as_deref() == Some("openvinoWhisper");
+
+    // The OpenVINO NPU provider is intentionally Windows-only. Keep this
+    // explicit error here because import can be invoked independently of the
+    // settings readiness check.
+    #[cfg(not(target_os = "windows"))]
+    if use_openvino {
+        return Err(anyhow!("Intel NPU transcription is available on Windows only"));
+    }
 
     emit_progress(&app, "copying", 5, "Creating meeting folder...");
 
@@ -509,13 +520,28 @@ async fn run_import<R: Runtime>(
     emit_progress(&app, "transcribing", 30, "Loading transcription engine...");
 
     // Initialize the appropriate engine
-    let whisper_engine = if !use_parakeet && total_segments > 0 {
+    let whisper_engine = if !use_parakeet && !use_openvino && total_segments > 0 {
         Some(get_or_init_whisper(&app, model.as_deref()).await?)
     } else {
         None
     };
     let parakeet_engine = if use_parakeet && total_segments > 0 {
         Some(get_or_init_parakeet(&app, model.as_deref()).await?)
+    } else {
+        None
+    };
+    // Initialize once for the whole batch so the helper keeps the NPU-compiled
+    // model for every VAD segment.
+    #[cfg(target_os = "windows")]
+    let openvino_provider = if use_openvino && total_segments > 0 {
+        Some(
+            crate::audio::transcription::engine::get_or_init_openvino(
+                &app,
+                model.as_deref().unwrap_or("whisper-small-int8"),
+            )
+            .await
+            .map_err(|e| anyhow!("OpenVINO transcription initialization failed: {}", e))?,
+        )
     } else {
         None
     };
@@ -587,6 +613,21 @@ async fn run_import<R: Runtime>(
                 .await
                 .map_err(|e| anyhow!("Parakeet transcription failed on segment {}: {}", i, e))?;
             (text, 0.9f32)
+        } else if use_openvino {
+            #[cfg(target_os = "windows")]
+            {
+                let result = openvino_provider
+                    .as_ref()
+                    .expect("OpenVINO provider is initialized for this batch")
+                    .transcribe(segment.samples.clone(), language.clone())
+                    .await
+                    .map_err(|e| anyhow!("OpenVINO transcription failed on segment {}: {}", i, e))?;
+                (result.text, result.confidence.unwrap_or(0.0))
+            }
+            #[cfg(not(target_os = "windows"))]
+            {
+                return Err(anyhow!("Intel NPU transcription is available on Windows only"));
+            }
         } else {
             let engine = whisper_engine.as_ref().unwrap();
             let (text, conf, _) = engine

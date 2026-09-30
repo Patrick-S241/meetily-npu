@@ -27,6 +27,7 @@ interface UseRecordingStartReturn {
 
 interface TranscriptConfig {
   provider?: string;
+  model?: string;
 }
 
 /**
@@ -81,12 +82,16 @@ export function useRecordingStart(
   // Check the selected local transcription provider, not a hardcoded engine.
   const checkTranscriptionModelReady = useCallback(async (): Promise<boolean> => {
     try {
-      const provider = await getTranscriptionProvider();
+      const config = await invoke<TranscriptConfig | null>('api_get_transcript_config');
+      const provider = config?.provider || 'parakeet';
       const commands = getProviderCommands(provider);
 
       if (commands) {
         await invoke(commands.initialize);
-        return await invoke<boolean>(commands.hasAvailableModels);
+        const readiness = provider === 'openvinoWhisper'
+          ? await invoke<boolean | { ready: boolean }>(commands.hasAvailableModels, { modelId: config?.model })
+          : await invoke<boolean | { ready: boolean }>(commands.hasAvailableModels);
+        return typeof readiness === 'boolean' ? readiness : readiness.ready;
       }
 
       console.error(`Unsupported transcription provider: ${provider}`);

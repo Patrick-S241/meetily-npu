@@ -8,7 +8,7 @@ export interface RawModelInfo {
 }
 
 export interface ModelOption {
-  provider: 'whisper' | 'parakeet';
+  provider: 'whisper' | 'parakeet' | 'openvinoWhisper';
   name: string;
   displayName: string;
   size_mb: number;
@@ -61,6 +61,21 @@ export function useTranscriptionModels(transcriptModelConfig: TranscriptModelCon
       console.error('Failed to fetch Whisper models:', err);
     }
 
+    // Fetch OpenVINO Whisper models. The backend keeps these separate from GGML Whisper files.
+    try {
+      const openvinoModels = await invoke<Array<{ id: string; displayName?: string; ready?: boolean }>>('openvino_list_models');
+      allModels.push(...openvinoModels
+        .filter((m) => m.ready)
+        .map((m) => ({
+          provider: 'openvinoWhisper' as const,
+          name: m.id,
+          displayName: 'Intel NPU: ' + (m.displayName || m.id),
+          size_mb: 0,
+        })));
+    } catch (err) {
+      console.error('Failed to fetch OpenVINO Whisper models:', err);
+    }
+
     // Fetch Parakeet models
     try {
       const parakeetModels = await invoke<RawModelInfo[]>('parakeet_get_available_models');
@@ -88,7 +103,8 @@ export function useTranscriptionModels(transcriptModelConfig: TranscriptModelCon
     const configuredMatch = allModels.find(
       (m) =>
         (configuredProvider === 'localWhisper' && m.provider === 'whisper' && m.name === configuredModel) ||
-        (configuredProvider === 'parakeet' && m.provider === 'parakeet' && m.name === configuredModel)
+        (configuredProvider === 'parakeet' && m.provider === 'parakeet' && m.name === configuredModel) ||
+        (configuredProvider === 'openvinoWhisper' && m.provider === 'openvinoWhisper' && m.name === configuredModel)
     );
 
     // Only set default model if user hasn't manually selected one

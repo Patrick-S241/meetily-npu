@@ -512,15 +512,21 @@ jobs:
 
           $buildDirectory = "target/x86_64-pc-windows-msvc/$env:PORTABLE_BUILD_PROFILE"
           $configPath = (Join-Path $env:RUNNER_TEMP "tauri.windows-portable.conf.json").Replace('\', '/')
-          @{
+          $tauriConfig = @{
             build = @{
               beforeBundleCommand = @{
                 script = "node .github/verify-portable-ggml.cjs $buildDirectory"
                 cwd = $env:GITHUB_WORKSPACE
               }
             }
-          } | ConvertTo-Json -Depth 4 | Set-Content -Path $configPath -Encoding utf8
-          "args=--config `"$configPath`"" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+          }
+          $signingArgs = ''
+          if ('${{ github.event.inputs.sign-build }}' -ne 'true') {
+            $tauriConfig.bundle = @{ createUpdaterArtifacts = $false }
+            $signingArgs = ' --no-sign'
+          }
+          $tauriConfig | ConvertTo-Json -Depth 4 | Set-Content -Path $configPath -Encoding utf8
+          "args=--config `"$configPath`"$signingArgs" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
 
       - name: Rust cache
         uses: swatinem/rust-cache@v2
@@ -683,6 +689,68 @@ jobs:
           Write-Host "Copied llama-helper to frontend/src-tauri/binaries/"
           Get-ChildItem "frontend/src-tauri/binaries/"
 
+      - name: Build and package OpenVINO Whisper NPU helper
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $archiveName = 'openvino_genai_windows_2026.4.0.0_x86_64.zip'
+          $archiveUrl = "https://storage.openvinotoolkit.org/repositories/openvino_genai/packages/2026.4/windows/$archiveName"
+          $expectedSha256 = '478a05c5ea30da26db3ae637477d553303cf38f070641fb4f218daf6d4c0a2e9'
+          $archive = Join-Path $env:RUNNER_TEMP $archiveName
+          Invoke-WebRequest -Uri $archiveUrl -OutFile $archive
+          $actualSha256 = (Get-FileHash -LiteralPath $archive -Algorithm SHA256).Hash.ToLowerInvariant()
+          if ($actualSha256 -ne $expectedSha256) {
+            throw "OpenVINO GenAI archive SHA-256 mismatch: $actualSha256"
+          }
+
+          $sdkRoot = Join-Path $env:RUNNER_TEMP 'openvino-genai-2026.4'
+          Expand-Archive -LiteralPath $archive -DestinationPath $sdkRoot -Force
+          $sdk = Join-Path $sdkRoot 'openvino_genai_windows_2026.4.0.0_x86_64'
+          $cmakePackageDir = Join-Path $sdk 'runtime/cmake'
+          $buildDir = Join-Path $env:RUNNER_TEMP 'openvino-whisper-helper-build'
+          cmake -S openvino-whisper-helper -B $buildDir -DOpenVINO_DIR="$cmakePackageDir" -DOpenVINOGenAI_DIR="$cmakePackageDir" -DOPENVINO_WHISPER_JSON_INCLUDE="$sdk/samples/cpp/thirdparty/nlohmann_json/single_include" -DCMAKE_BUILD_TYPE=Release
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          cmake --build $buildDir --config Release --parallel
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          ctest --test-dir $buildDir --build-config Release --output-on-failure
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+          $binDir = 'frontend/src-tauri/binaries'
+          $runtimeDir = Join-Path $binDir 'openvino-runtime'
+          New-Item -ItemType Directory -Force -Path $runtimeDir | Out-Null
+          $helper = Join-Path $buildDir 'Release/openvino-whisper-helper.exe'
+          if (-not (Test-Path -LiteralPath $helper)) { throw "Missing OpenVINO sidecar: $helper" }
+          Copy-Item -LiteralPath $helper -Destination (Join-Path $binDir 'openvino-whisper-helper-x86_64-pc-windows-msvc.exe')
+
+          $releaseDllDir = Join-Path $sdk 'runtime/bin/intel64/Release'
+          $requiredDlls = @(
+            'openvino.dll',
+            'openvino_genai.dll',
+            'openvino_tokenizers.dll',
+            'openvino_ir_frontend.dll',
+            'openvino_intel_npu_plugin.dll',
+            'openvino_intel_npu_compiler_loader.dll',
+            'openvino_intel_npu_compiler.dll',
+            'openvino_intel_npu_vm_runtime.dll'
+          )
+          foreach ($dll in $requiredDlls) {
+            $sourceDll = Join-Path $releaseDllDir $dll
+            if (-not (Test-Path -LiteralPath $sourceDll)) { throw "Missing required OpenVINO DLL: $sourceDll" }
+            Copy-Item -LiteralPath $sourceDll -Destination $runtimeDir
+          }
+          $tbbDll = Join-Path $sdk 'runtime/3rdparty/tbb/bin/tbb12.dll'
+          if (-not (Test-Path -LiteralPath $tbbDll)) { throw "Missing required TBB DLL: $tbbDll" }
+          Copy-Item -LiteralPath $tbbDll -Destination $runtimeDir
+          Copy-Item -LiteralPath (Join-Path $sdk 'runtime/version.txt') -Destination $runtimeDir
+          Copy-Item -LiteralPath (Join-Path $sdk 'docs/licensing/Apache_license.txt') -Destination $runtimeDir
+          Copy-Item -LiteralPath (Join-Path $sdk 'docs/licensing/LICENSE-GENAI') -Destination $runtimeDir
+          Copy-Item -LiteralPath (Join-Path $sdk 'docs/openvino_tokenizers/LICENSE') -Destination (Join-Path $runtimeDir 'LICENSE-TOKENIZERS')
+
+          # NPU execution remains explicit in the helper; no AUTO/CPU/GPU plugin is bundled here.
+          $forbidden = @('openvino_auto_plugin.dll', 'openvino_intel_cpu_plugin.dll', 'openvino_intel_gpu_plugin.dll')
+          foreach ($dll in $forbidden) {
+            if (Test-Path -LiteralPath (Join-Path $runtimeDir $dll)) { throw "Unexpected fallback plugin in NPU bundle: $dll" }
+          }
       - name: Cache FFmpeg binary
         uses: actions/cache@v4
         with:
@@ -693,7 +761,6 @@ jobs:
         with:
           path: frontend/src-tauri/binaries/onnxruntime
           key: ${{ runner.os }}-onnxruntime-x86_64-pc-windows-msvc-${{ hashFiles('frontend/src-tauri/build/onnxruntime.rs') }}
-
 
       - name: Build Tauri app
         uses: tauri-apps/tauri-action@v0
@@ -711,11 +778,84 @@ jobs:
           projectPath: frontend
           args: --target x86_64-pc-windows-msvc --features vulkan ${{ steps.build-profile.outputs.args }} ${{ steps.windows-portability.outputs.args }}
 
+      - name: Test Windows Rust transcription integration
+        shell: pwsh
+        run: |
+          cargo test --manifest-path frontend/src-tauri/Cargo.toml --target x86_64-pc-windows-msvc --features vulkan --lib
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
       - name: Verify build artifacts
         shell: bash
         run: |
           echo "## Build Artifacts"
           find target/x86_64-pc-windows-msvc/${{ steps.build-profile.outputs.profile }}/bundle -type f \( -name "*.msi" -o -name "*.exe" \) -exec ls -lh {} \;
+
+      - name: Verify OpenVINO files in packaged MSI
+        timeout-minutes: 3
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $bundleDir = 'target/x86_64-pc-windows-msvc/${{ steps.build-profile.outputs.profile }}/bundle/msi'
+          $msi = Get-ChildItem -LiteralPath $bundleDir -Filter '*.msi' -File | Select-Object -First 1
+          if (-not $msi) { throw "No MSI found in $bundleDir" }
+          $extractDir = Join-Path $env:RUNNER_TEMP 'meetily-openvino-msi-check'
+          New-Item -ItemType Directory -Force -Path $extractDir | Out-Null
+          $arguments = @('/a', ('"' + $msi.FullName + '"'), '/qn', ('TARGETDIR="' + $extractDir + '"'))
+          $result = Start-Process -FilePath 'msiexec.exe' -ArgumentList $arguments -Wait -PassThru -WindowStyle Hidden
+          if ($result.ExitCode -ne 0) { throw "MSI administrative extraction failed: $($result.ExitCode)" }
+          $helper = Get-ChildItem -LiteralPath $extractDir -Recurse -File -Filter 'openvino-whisper-helper*.exe' | Select-Object -First 1
+          $runtime = Get-ChildItem -LiteralPath $extractDir -Recurse -Directory -Filter 'openvino-runtime' | Select-Object -First 1
+          if (-not $helper -or -not $runtime) { throw 'Packaged OpenVINO helper or runtime directory missing' }
+          $runtimeCandidates = @(
+            (Join-Path $helper.DirectoryName 'openvino-runtime'),
+            (Join-Path $helper.DirectoryName 'resources/openvino-runtime')
+          )
+          if ($runtime.FullName -notin $runtimeCandidates) { throw "Packaged runtime is not discoverable next to the helper: $($runtime.FullName)" }
+          foreach ($name in @('openvino.dll', 'openvino_genai.dll', 'openvino_tokenizers.dll', 'openvino_intel_npu_plugin.dll', 'tbb12.dll')) {
+            if (-not (Test-Path -LiteralPath (Join-Path $runtime.FullName $name))) { throw "Packaged OpenVINO runtime missing $name" }
+          }
+          # Exercise the packaged binary and DLL set on a runner without NPU hardware.
+          $start = [System.Diagnostics.ProcessStartInfo]::new()
+          $start.FileName = $helper.FullName
+          $start.UseShellExecute = $false
+          $start.RedirectStandardInput = $true
+          $start.RedirectStandardOutput = $true
+          $start.RedirectStandardError = $true
+          $start.CreateNoWindow = $true
+          $start.Environment['PATH'] = "$($runtime.FullName);$($start.Environment['PATH'])"
+          $process = [System.Diagnostics.Process]::Start($start)
+          try {
+            $header = [System.Text.Encoding]::UTF8.GetBytes('{"protocol":1,"id":1,"op":"probe"}')
+            $stream = $process.StandardInput.BaseStream
+            $length = [System.BitConverter]::GetBytes([uint32]$header.Length)
+            $stream.Write($length, 0, 4)
+            $stream.Write($header, 0, $header.Length)
+            $stream.Flush()
+            $sizeBytes = [byte[]]::new(4)
+            $responseStream = $process.StandardOutput.BaseStream
+            $prefixRead = 0
+            while ($prefixRead -lt 4) {
+              $count = $responseStream.Read($sizeBytes, $prefixRead, 4 - $prefixRead)
+              if ($count -eq 0) { throw 'Packaged helper did not return a protocol frame' }
+              $prefixRead += $count
+            }
+            $size = [System.BitConverter]::ToUInt32($sizeBytes, 0)
+            if ($size -eq 0 -or $size -gt 1048576) { throw "Invalid packaged helper response size: $size" }
+            $responseBytes = [byte[]]::new($size)
+            $offset = 0
+            while ($offset -lt $size) {
+              $count = $responseStream.Read($responseBytes, $offset, $size - $offset)
+              if ($count -eq 0) { throw 'Packaged helper response ended early' }
+              $offset += $count
+            }
+            $response = [System.Text.Encoding]::UTF8.GetString($responseBytes) | ConvertFrom-Json
+            if ($response.protocol -ne 1 -or $response.id -ne 1) { throw 'Packaged helper protocol mismatch' }
+            if ($response.ok -and $response.device -ne 'NPU') { throw 'Packaged helper selected a non-NPU device' }
+            if (-not $response.ok -and $response.error_code -ne 'NPU_NOT_AVAILABLE') { throw "Packaged helper probe failed: $($response.error_code)" }
+          } finally {
+            if (-not $process.HasExited) { $process.Kill() }
+            $process.Dispose()
+          }
 
       - name: Upload artifacts
         if: ${{ github.event.inputs.upload-artifacts == 'true' }}

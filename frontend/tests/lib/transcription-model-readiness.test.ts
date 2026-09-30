@@ -22,6 +22,14 @@ describe('transcription model readiness', () => {
     });
   });
 
+  test('uses OpenVINO commands when the Intel NPU provider is configured', () => {
+    expect(getProviderCommands('openvinoWhisper')).toEqual({
+      initialize: 'openvino_probe',
+      hasAvailableModels: 'openvino_validate_model_ready',
+      getAvailableModels: 'openvino_list_models',
+    });
+  });
+
   test('does not silently treat an unsupported provider as Parakeet', () => {
     expect(getProviderCommands('deepgram')).toBeNull();
   });

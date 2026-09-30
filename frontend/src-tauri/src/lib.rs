@@ -653,6 +653,17 @@ pub fn run() {
             whisper_engine::commands::whisper_download_model,
             whisper_engine::commands::whisper_cancel_download,
             whisper_engine::commands::whisper_delete_corrupted_model,
+            // Intel NPU OpenVINO Whisper commands (Windows only)
+            #[cfg(target_os = "windows")]
+            audio::transcription::openvino_models::openvino_probe,
+            #[cfg(target_os = "windows")]
+            audio::transcription::openvino_models::openvino_list_models,
+            #[cfg(target_os = "windows")]
+            audio::transcription::openvino_models::openvino_download_model,
+            #[cfg(target_os = "windows")]
+            audio::transcription::openvino_models::openvino_delete_model,
+            #[cfg(target_os = "windows")]
+            audio::transcription::openvino_models::openvino_validate_model_ready,
             // Parakeet engine commands
             parakeet_engine::commands::parakeet_init,
             parakeet_engine::commands::parakeet_get_available_models,
@@ -854,6 +865,8 @@ pub fn run() {
                             log::warn!("AppState not available for database cleanup (likely first launch)");
                         }
 
+                        #[cfg(target_os = "windows")]
+                        audio::transcription::openvino_whisper_provider::shutdown_all_openvino_providers().await;
                         // Clean up sidecar
                         log::info!("Cleaning up sidecar...");
                         if let Err(e) = summary::summary_engine::force_shutdown_sidecar().await {

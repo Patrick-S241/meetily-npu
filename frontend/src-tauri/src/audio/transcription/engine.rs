@@ -88,6 +88,10 @@ pub async fn validate_transcription_model_ready<R: Runtime>(app: &AppHandle<R>) 
 
     // Validate based on provider
     match config.provider.as_str() {
+        #[cfg(target_os = "windows")]
+        "openvinoWhisper" => get_or_init_openvino(app, &config.model).await.map(|_| ()),
+        #[cfg(not(target_os = "windows"))]
+        "openvinoWhisper" => Err("Intel NPU transcription is available on Windows only".to_string()),
         "localWhisper" => {
             info!("🔍 Validating Whisper model...");
             // Ensure whisper engine is initialized first
@@ -184,6 +188,13 @@ pub async fn get_or_init_transcription_engine<R: Runtime>(
 
     // Initialize the appropriate engine based on provider
     match config.provider.as_str() {
+        #[cfg(target_os = "windows")]
+        "openvinoWhisper" => {
+            let provider = get_or_init_openvino(app, &config.model).await?;
+            Ok(TranscriptionEngine::Provider(provider))
+        }
+        #[cfg(not(target_os = "windows"))]
+        "openvinoWhisper" => Err("Intel NPU transcription is available on Windows only".to_string()),
         "parakeet" => {
             info!("🦜 Initializing Parakeet transcription engine");
 
@@ -218,6 +229,18 @@ pub async fn get_or_init_transcription_engine<R: Runtime>(
             Ok(TranscriptionEngine::Whisper(whisper_engine))
         }
     }
+}
+
+#[cfg(target_os = "windows")]
+pub async fn get_or_init_openvino<R: Runtime>(
+    app: &AppHandle<R>,
+    model: &str,
+) -> Result<Arc<super::openvino_whisper_provider::OpenVinoWhisperProvider>, String> {
+    let (model_path, _operation) = super::openvino_models::lock_and_ensure_ready(app, model).await?;
+    let cache_dir = super::openvino_models::cache_dir(app, model)?;
+    super::openvino_whisper_provider::OpenVinoWhisperProvider::get_or_init(
+        app, model, model_path, cache_dir,
+    ).await
 }
 
 /// Get or initialize transcription engine using API configuration
