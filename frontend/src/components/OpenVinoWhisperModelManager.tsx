@@ -1,7 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { Check, Cpu } from 'lucide-react';
+import { Check, Cpu, Download, HardDrive, Trash2 } from 'lucide-react';
 import { listen } from '@tauri-apps/api/event';
 import { invoke } from '@tauri-apps/api/core';
 import { toast } from 'sonner';
@@ -41,9 +41,11 @@ interface Props {
   autoSave?: boolean;
 }
 
-const labels: Record<string, string> = {
+const fallbackModelNames: Record<string, string> = {
   'whisper-base-int8': 'Whisper Base INT8',
   'whisper-small-int8': 'Whisper Small INT8',
+  'whisper-medium-int8': 'Whisper Medium INT8',
+  'whisper-large-v3-turbo-int4': 'Whisper Large V3 Turbo INT4',
 };
 
 function formatBytes(bytes?: number): string | null {
@@ -134,7 +136,9 @@ export function OpenVinoWhisperModelManager({ selectedModel, onModelSelect, clas
     catch (deleteError) { toast.error('Could not delete OpenVINO model', { description: String(deleteError) }); }
   };
 
-  const all: Model[] = models.length ? models : Object.keys(labels).map((id) => ({ id }));
+  const all: Model[] = models.length
+    ? models
+    : Object.entries(fallbackModelNames).map(([id, displayName]) => ({ id, displayName }));
   const available = probe?.available === true;
 
   return (
@@ -161,31 +165,47 @@ export function OpenVinoWhisperModelManager({ selectedModel, onModelSelect, clas
         const percentage = event?.progress ?? (downloadedBytes !== undefined && totalBytes ? downloadedBytes / totalBytes * 100 : 0);
         const modelSize = formatBytes(totalBytes);
         const progressSize = downloadedBytes === undefined ? null : `${formatBytes(downloadedBytes)}${modelSize ? ` / ${modelSize}` : ''}`;
+        const modelName = model.displayName ?? fallbackModelNames[model.id] ?? model.id;
+        const status = isSelecting
+          ? { label: 'Preparing NPU', dotClassName: 'bg-blue-500', textClassName: 'text-blue-700' }
+          : state === 'ready'
+          ? { label: 'Installed', dotClassName: 'bg-green-500', textClassName: 'text-green-600' }
+          : state === 'downloading' || state === 'validating'
+            ? { label: state === 'validating' ? 'Validating' : 'Downloading', dotClassName: 'bg-blue-500', textClassName: 'text-blue-700' }
+            : state === 'failed'
+              ? { label: 'Download failed', dotClassName: 'bg-red-500', textClassName: 'text-red-700' }
+              : state === 'downloaded'
+                ? { label: 'Needs validation', dotClassName: 'bg-amber-500', textClassName: 'text-amber-700' }
+                : { label: 'Not downloaded', dotClassName: 'bg-gray-400', textClassName: 'text-gray-600' };
 
-        return <div key={model.id} className={`rounded-lg border-2 p-4 transition-colors ${isSelected && state === 'ready' ? 'border-blue-500 bg-blue-50' : 'border-gray-200 bg-white'}`}>
-          <div className="flex items-start justify-between gap-3">
-            <div>
-              <div className="flex items-center gap-2">
+        return <div key={model.id} className={`relative rounded-lg border-2 p-4 transition-colors ${isSelected ? 'border-blue-500 bg-blue-50' : state === 'ready' ? 'border-gray-200 bg-white hover:border-gray-300' : 'border-gray-200 bg-gray-50'}`}>
+          {model.id === DEFAULT_OPENVINO_WHISPER_MODEL ? <span className="absolute -right-2 -top-2 rounded-full bg-blue-600 px-2 py-0.5 text-xs font-medium text-white">Recommended</span> : null}
+          <div className="flex items-start justify-between gap-4">
+            <div className="min-w-0 flex-1">
+              <div className="flex flex-wrap items-center gap-2">
                 <Cpu className="h-5 w-5 text-blue-600" aria-hidden="true" />
-                <p className="font-semibold text-gray-900">{labels[model.id] ?? model.displayName ?? model.id}</p>
-                {model.id === DEFAULT_OPENVINO_WHISPER_MODEL ? <span className="rounded-full bg-blue-600 px-2 py-0.5 text-xs font-medium text-white">Recommended</span> : null}
-                {isSelected && state === 'ready' ? <span className="flex items-center gap-1 rounded-full bg-blue-600 px-2 py-0.5 text-xs font-medium text-white"><Check className="h-3 w-3" aria-hidden="true" /> Selected</span> : null}
+                <p className="font-semibold text-gray-900">{modelName}</p>
+                {isSelected ? <span className="flex items-center gap-1 rounded-full bg-blue-600 px-2 py-0.5 text-xs font-medium text-white"><Check className="h-3 w-3" aria-hidden="true" /> Selected</span> : null}
               </div>
-              <p className="mt-1 text-sm text-gray-600">Multilingual Whisper model for local Intel NPU transcription.</p>
-              {modelSize ? <p className="mt-1 text-xs text-gray-500">Model size: {modelSize}</p> : null}
-              <p className="mt-1 text-xs text-gray-500">{isSelecting ? `Preparing model on the NPU… ${selectionElapsedSeconds}s elapsed. The first compilation can take several minutes.` : event?.message ?? (state === 'ready' ? 'Ready for NPU transcription' : state)}</p>
+              <p className="ml-7 mt-1 text-sm text-gray-600">Multilingual Whisper model for local Intel NPU transcription.</p>
+              {modelSize ? <p className="ml-7 mt-2 flex items-center gap-1.5 text-sm text-gray-600"><HardDrive className="h-4 w-4" aria-hidden="true" />{modelSize}</p> : null}
+              <p className="mt-1 text-xs text-gray-500">{isSelecting ? `Preparing model on the NPU… ${selectionElapsedSeconds}s elapsed. The first compilation can take several minutes.` : event?.message ?? (state === 'ready' ? 'Model files verified. NPU loading is checked on selection.' : state)}</p>
               {model.reason ? <p className="text-xs text-red-700">{model.reason}</p> : null}
             </div>
 
-            <div className="flex shrink-0 items-center gap-2">
+            <div className="flex shrink-0 flex-col items-end gap-2">
+              <div className={`flex items-center gap-1.5 text-xs font-medium ${status.textClassName}`}>
+                <span className={`h-2 w-2 rounded-full ${status.dotClassName}`} aria-hidden="true" />
+                {status.label}
+              </div>
               {state === 'ready' ? <>
-                <button disabled={isBusy || isSelected} className="rounded bg-blue-600 px-3 py-1.5 text-sm text-white disabled:bg-gray-400" onClick={() => void select(model.id)}>{isSelecting ? 'Preparing…' : isSelected ? 'Selected' : 'Select'}</button>
-                <button disabled={isBusy} className="rounded border px-3 py-1.5 text-sm disabled:text-gray-400" onClick={() => void remove(model.id)}>Delete</button>
+                <button disabled={isBusy} className="rounded bg-blue-600 px-3 py-1.5 text-sm text-white disabled:bg-gray-400" onClick={() => void select(model.id)}>{isSelecting ? 'Preparing…' : isSelected ? 'Check NPU' : 'Select'}</button>
+                <button disabled={isBusy} className="flex items-center gap-1 rounded border px-3 py-1.5 text-sm disabled:text-gray-400" onClick={() => void remove(model.id)}><Trash2 className="h-4 w-4" aria-hidden="true" />Delete</button>
               </> : state === 'downloaded' ? <>
                 <button disabled={!available || isBusy} className="rounded bg-blue-600 px-3 py-1.5 text-sm text-white disabled:bg-gray-400" onClick={() => void select(model.id)}>{isSelecting ? 'Preparing…' : 'Validate'}</button>
-                <button disabled={isBusy} className="rounded border px-3 py-1.5 text-sm disabled:text-gray-400" onClick={() => void remove(model.id)}>Delete</button>
+                <button disabled={isBusy} className="flex items-center gap-1 rounded border px-3 py-1.5 text-sm disabled:text-gray-400" onClick={() => void remove(model.id)}><Trash2 className="h-4 w-4" aria-hidden="true" />Delete</button>
               </> : state === 'downloading' || state === 'validating' ? <span className="text-sm text-blue-700">{state === 'downloading' ? `${Math.round(percentage)}%` : 'Preparing...'}</span>
-                : <button disabled={!available || isBusy} className="rounded bg-blue-600 px-3 py-1.5 text-sm text-white disabled:bg-gray-400" onClick={() => void download(model.id)}>{state === 'failed' ? 'Retry' : 'Download'}</button>}
+                : <button disabled={!available || isBusy} className="flex items-center gap-1 rounded bg-blue-600 px-3 py-1.5 text-sm text-white disabled:bg-gray-400" onClick={() => void download(model.id)}><Download className="h-4 w-4" aria-hidden="true" />{state === 'failed' ? 'Retry' : 'Download'}</button>}
             </div>
           </div>
 

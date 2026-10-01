@@ -4,7 +4,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '.
 import { Input } from './ui/input';
 import { Button } from './ui/button';
 import { Label } from './ui/label';
-import { Eye, EyeOff, Lock, Unlock } from 'lucide-react';
+import { Cpu, Eye, EyeOff, House, Lock, Unlock, Zap } from 'lucide-react';
 import { ModelManager } from './WhisperModelManager';
 import { ParakeetModelManager } from './ParakeetModelManager';
 import { OpenVinoWhisperModelManager } from './OpenVinoWhisperModelManager';
@@ -128,9 +128,17 @@ export function TranscriptSettings({ transcriptModelConfig, setTranscriptModelCo
                                     <SelectValue placeholder="Select provider" />
                                 </SelectTrigger>
                                 <SelectContent>
-                                    <SelectItem value="parakeet">⚡ Parakeet (Recommended - Real-time / Accurate)</SelectItem>
-                                    <SelectItem value="localWhisper">🏠 Local Whisper (High Accuracy)</SelectItem>
-                                    {platform === 'windows' && <SelectItem value="openvinoWhisper">Intel NPU (OpenVINO Whisper)</SelectItem>}
+                                    <SelectItem value="parakeet">
+                                        <span className="flex items-center gap-2"><Zap className="h-4 w-4 text-amber-500" aria-hidden="true" />Parakeet (Recommended - Real-time / Accurate)</span>
+                                    </SelectItem>
+                                    <SelectItem value="localWhisper">
+                                        <span className="flex items-center gap-2"><House className="h-4 w-4 text-slate-600" aria-hidden="true" />Local Whisper (High Accuracy)</span>
+                                    </SelectItem>
+                                    {platform === 'windows' && (
+                                        <SelectItem value="openvinoWhisper">
+                                            <span className="flex items-center gap-2"><Cpu className="h-4 w-4 text-blue-600" aria-hidden="true" />Intel NPU (OpenVINO Whisper)</span>
+                                        </SelectItem>
+                                    )}
                                     {/* <SelectItem value="deepgram">☁️ Deepgram (Backup)</SelectItem>
                                     <SelectItem value="elevenLabs">☁️ ElevenLabs</SelectItem>
                                     <SelectItem value="groq">☁️ Groq</SelectItem>

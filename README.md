@@ -139,7 +139,7 @@ pnpm install --frozen-lockfile
 
 Transcribe meetings entirely on your device using **Whisper** or **Parakeet** models. No cloud required.
 
-On supported Windows 11 Intel Core Ultra laptops, **Intel NPU (OpenVINO Whisper)** adds local multilingual Base/Small INT8 transcription with explicit NPU execution. See [Intel NPU transcription](docs/INTEL_NPU_TRANSCRIPTION.md) for setup, diagnostics, and build details.
+On supported Windows 11 Intel Core Ultra laptops, **Intel NPU (OpenVINO Whisper)** adds local multilingual Base, Small, Medium, and Large V3 Turbo model options with explicit NPU execution. See [Intel NPU transcription](docs/INTEL_NPU_TRANSCRIPTION.md) for setup, diagnostics, and build details.
 
 <p align="center">
     <img src="docs/home.png" width="650" style="border-radius: 10px;" alt="Meetily Demo" />

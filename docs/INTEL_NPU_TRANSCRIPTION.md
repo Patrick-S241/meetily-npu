@@ -1,13 +1,15 @@
 # Intel NPU transcription (Windows)
 
-Meetily can run multilingual Whisper locally on a supported Intel NPU. The provider is **Intel NPU (OpenVINO Whisper)** and offers **Whisper Base INT8** and **Whisper Small INT8**. Small is the provider default. Audio and transcripts stay on the computer. Whisper encoder and decoder are invoked with the explicit device `NPU`; the bundled CPU plugin is required only because OpenVINO GenAI compiles the model's tokenizer and detokenizer on CPU. This is not a CPU or GPU fallback for Whisper inference.
+Meetily can run multilingual Whisper locally on a supported Intel NPU. The provider is **Intel NPU (OpenVINO Whisper)** and offers Base INT8, Small INT8, Medium INT8, and Large V3 Turbo INT4. Small is the provider default. Audio and transcripts stay on the computer. Whisper encoder and decoder are invoked with the explicit device `NPU`; the bundled CPU plugin is required only because OpenVINO GenAI compiles the model's tokenizer and detokenizer on CPU. This is not a CPU or GPU fallback for Whisper inference.
 
 ## Use
 
 1. On Windows 11 with an Intel Core Ultra NPU, open transcription settings and choose **Intel NPU (OpenVINO Whisper)**.
 2. Check the NPU status and OpenVINO runtime version shown in the model manager. If the NPU is unavailable, update its driver using the laptop maker's or Intel's supported channel. Other Meetily providers remain available.
-3. Download Base INT8 or Small INT8. Downloads are stored under Meetily application data in `models/openvino/<model>/<pinned-revision>/`, separate from whisper.cpp models. Interrupted, incomplete, or corrupted files do not count as ready; Retry and Delete are available.
-4. Select a ready model and start a recording, import audio, or retranscribe a meeting. The first load may take longer while OpenVINO compiles for the NPU. Meetily stores the compilation cache in its application data, scoped by OpenVINO version and model revision, so later loads can be faster.
+3. Download a model. Downloads are stored under Meetily application data in `models/openvino/<model>/<pinned-revision>/`, separate from whisper.cpp models. Interrupted, incomplete, or corrupted files do not count as ready; Retry and Delete are available.
+4. Select an installed model and start a recording, import audio, or retranscribe a meeting. The first load may take longer while OpenVINO compiles for the NPU. Meetily stores the compilation cache in its application data, scoped by OpenVINO version and model revision, so later loads can be faster.
+
+The model card's **Installed** status confirms that the downloaded files passed integrity checks. **Select** or **Check NPU** loads the model on the current NPU and reports a compatibility error if that fails. **Selected** marks the model in the transcript configuration.
 
 Meetily's normal installer bundles the native helper and its OpenVINO runtime. Running the installed application does not require Python, Node.js, a separate OpenVINO SDK, environment setup, or Administrator rights. An Intel NPU and a compatible driver are required. The app does not install device drivers.
 
@@ -19,12 +21,16 @@ Pinned distribution: [OpenVINO GenAI 2026.4.0.0 Windows x64 archive](https://sto
 
 Model sources and immutable revisions:
 
-| Meetily model | Official source | Revision |
-| --- | --- | --- |
-| Whisper Base INT8 | [OpenVINO/whisper-base-int8-ov](https://huggingface.co/OpenVINO/whisper-base-int8-ov) | `0fc9ee0ddbdde7eb70d7fda96ec76fb351f01b29` |
-| Whisper Small INT8 | [OpenVINO/whisper-small-int8-ov](https://huggingface.co/OpenVINO/whisper-small-int8-ov) | `bbfa330248b664208618f19e08dfed5adf92b27a` |
+| Meetily model | Download | Official source | Revision | License |
+| --- | ---: | --- | --- | --- |
+| Whisper Base INT8 | 80.8 MiB | [OpenVINO/whisper-base-int8-ov](https://huggingface.co/OpenVINO/whisper-base-int8-ov) | `0fc9ee0ddbdde7eb70d7fda96ec76fb351f01b29` | Apache-2.0 |
+| Whisper Small INT8 | 244.9 MiB | [OpenVINO/whisper-small-int8-ov](https://huggingface.co/OpenVINO/whisper-small-int8-ov) | `bbfa330248b664208618f19e08dfed5adf92b27a` | Apache-2.0 |
+| Whisper Medium INT8 | 747.7 MiB | [OpenVINO/whisper-medium-int8-ov](https://huggingface.co/OpenVINO/whisper-medium-int8-ov) | `8d43cce846729381f56bd45a1c70925cee2222ff` | Apache-2.0 |
+| Whisper Large V3 Turbo INT4 | 455.4 MiB | [OpenVINO/whisper-large-v3-turbo-int4-ov](https://huggingface.co/OpenVINO/whisper-large-v3-turbo-int4-ov) | `ae50b4d9a9dbaf16f2df59c23f3984e42f864dfc` | MIT |
 
-`openvino_models_manifest.json` lists every downloaded file with size and SHA-256. The download manager fetches only URLs at the pinned revisions, stages files, validates them, and renames the staged directory into place. This manifest should be updated and tested before changing either the OpenVINO release or a model revision. The model cards say their IR requires OpenVINO 2025.2 or later, but a real NPU load test of this exact version pair remains necessary.
+The sizes are the pinned download files, without the additional NPU compilation cache. They cannot be compared directly with whisper.cpp model sizes because the file formats and quantization differ. Larger models may improve recognition but use more memory and can take longer to load or transcribe. Large V3 Turbo has a pruned decoder and INT4 weights; its smaller download size does not make it the same model as Small. Selecting a model validates loading on the current NPU before it becomes ready for transcription.
+
+`openvino_models_manifest.json` lists every downloaded file with size and SHA-256. The download manager fetches only URLs at the pinned revisions, stages files, validates them, and renames the staged directory into place. This manifest should be updated and tested before changing either the OpenVINO release or a model revision. The Medium model card requires OpenVINO 2025.2 or later; Large V3 Turbo INT4 requires 2026.1 or later. The bundled 2026.4 satisfies both version requirements, but each model still needs a real load and transcription test on the target NPU.
 
 ## Build and package on Windows
 
@@ -76,4 +82,4 @@ A target aggregate RTF below 1 after warm-up is a performance goal, not a reason
 
 ## Licenses
 
-OpenVINO Runtime, GenAI, Tokenizers, and the official converted Whisper artifacts are distributed under Apache-2.0 according to their official repositories/model cards. The original OpenAI Whisper models use the MIT license. The bundled archive's Runtime, GenAI, and Tokenizers notices are copied into `openvino-runtime/`; the model sources and revisions are listed above. The SDK's `nlohmann/json` header is used only at build time under the MIT license included with the official SDK archive.
+OpenVINO Runtime, GenAI, and Tokenizers are distributed under Apache-2.0. The converted model licenses are listed above; Large V3 Turbo INT4 is MIT-licensed. The original OpenAI Whisper models use the MIT license. The bundled archive's Runtime, GenAI, and Tokenizers notices are copied into `openvino-runtime/`; the model sources and revisions are listed above. The SDK's `nlohmann/json` header is used only at build time under the MIT license included with the official SDK archive.

@@ -142,7 +142,9 @@ pub async fn openvino_download_model<R: Runtime>(app: AppHandle<R>, model_id: St
         return Ok(Ready { ready:true, path:Some(model_path.display().to_string()), reason:None });
     }
     emit(&app, &model, "resolving", 0, None, Some(format!("OpenVINO runtime {}", catalogue()?.runtime_version)));
-    let client = Client::builder().timeout(Duration::from_secs(120)).build().map_err(|e| e.to_string())?;
+    // Large model files can take much longer than two minutes in total.
+    // Bound connection and idle time without aborting an active download.
+    let client = Client::builder().connect_timeout(Duration::from_secs(30)).build().map_err(|e| e.to_string())?;
     let total: u64 = model.files.iter().map(|file| file.size).sum();
     let final_dir = path(&app, &model)?; let parent = final_dir.parent().ok_or("Invalid model path")?;
     tokio::fs::create_dir_all(parent).await.map_err(|e| e.to_string())?;
@@ -156,9 +158,18 @@ pub async fn openvino_download_model<R: Runtime>(app: AppHandle<R>, model_id: St
                 let downloaded = async {
                     // revision is validated as a complete commit SHA, never a mutable branch or tag.
                     let url = format!("https://huggingface.co/{}/resolve/{}/{}", model.repo, model.revision, file.path);
-                    let mut stream = client.get(url).send().await.map_err(|e| e.to_string())?.error_for_status().map_err(|e| e.to_string())?.bytes_stream();
+                    let response = tokio::time::timeout(Duration::from_secs(120), client.get(url).send()).await
+                        .map_err(|_| format!("{} download response timed out", file.path))?
+                        .map_err(|e| e.to_string())?;
+                    let mut stream = response.error_for_status().map_err(|e| e.to_string())?.bytes_stream();
                     let mut out = tokio::fs::File::create(&dest).await.map_err(|e| e.to_string())?; let mut got = 0;
-                    while let Some(chunk) = stream.next().await { let chunk = chunk.map_err(|e| e.to_string())?; out.write_all(&chunk).await.map_err(|e| e.to_string())?; got += chunk.len() as u64; emit(&app, &model, "downloading", done + got, Some(total), Some(file.path.clone())); }
+                    while let Some(chunk) = tokio::time::timeout(Duration::from_secs(120), stream.next()).await
+                        .map_err(|_| format!("{} download stalled", file.path))? {
+                        let chunk = chunk.map_err(|e| e.to_string())?;
+                        out.write_all(&chunk).await.map_err(|e| e.to_string())?;
+                        got += chunk.len() as u64;
+                        emit(&app, &model, "downloading", done + got, Some(total), Some(file.path.clone()));
+                    }
                     out.flush().await.map_err(|e| e.to_string())?;
                     if got != file.size { return Err(format!("{} size mismatch", file.path)); }
                     if !sha256_file(&dest).await?.eq_ignore_ascii_case(&file.sha256) { return Err(format!("{} SHA-256 mismatch", file.path)); }
@@ -226,7 +237,7 @@ mod tests {
     #[test]
     fn manifest_requires_all_pinned_artifacts() {
         let manifest = catalogue().expect("manifest must be immutable");
-        assert_eq!(manifest.models.len(), 2);
+        assert_eq!(manifest.models.len(), 4);
         for model in manifest.models { assert_eq!(model.files.len(), MODEL_FILES.len()); validate_spec(&model).unwrap(); }
     }
 }
