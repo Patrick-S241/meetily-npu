@@ -64,6 +64,7 @@ export function OpenVinoWhisperModelManager({ selectedModel, onModelSelect, clas
   const [error, setError] = useState<string | null>(null);
   const [selectingModelId, setSelectingModelId] = useState<string | null>(null);
   const [selectionElapsedSeconds, setSelectionElapsedSeconds] = useState(0);
+  const [selectionErrors, setSelectionErrors] = useState<Record<string, string>>({});
   const mounted = useRef(true);
   const refreshId = useRef(0);
   const selectInFlight = useRef<string | null>(null);
@@ -111,15 +112,24 @@ export function OpenVinoWhisperModelManager({ selectedModel, onModelSelect, clas
   const select = async (id: string) => {
     if (selectInFlight.current) return;
     selectInFlight.current = id;
-    if (mounted.current) setSelectingModelId(id);
+    if (mounted.current) {
+      setSelectingModelId(id);
+      setSelectionErrors((current) => {
+        const next = { ...current };
+        delete next[id];
+        return next;
+      });
+    }
     try {
       const result = await invoke<{ ready: boolean; reason?: string }>('openvino_validate_model_ready', { modelId: id });
       if (!result.ready) throw new Error(result.reason ?? 'Model validation failed');
-      onModelSelect?.(id);
       if (autoSave) await invoke('api_save_transcript_config', { provider: 'openvinoWhisper', model: id, apiKey: null });
+      onModelSelect?.(id);
       void refresh();
     } catch (selectError) {
-      toast.error('OpenVINO model is not ready', { description: String(selectError) });
+      const message = selectError instanceof Error ? selectError.message : String(selectError);
+      if (mounted.current) setSelectionErrors((current) => ({ ...current, [id]: message }));
+      toast.error('OpenVINO model is not ready', { description: message });
     } finally {
       selectInFlight.current = null;
       if (mounted.current) setSelectingModelId(null);
@@ -127,12 +137,25 @@ export function OpenVinoWhisperModelManager({ selectedModel, onModelSelect, clas
   };
 
   const download = async (id: string) => {
+    setSelectionErrors((current) => {
+      const next = { ...current };
+      delete next[id];
+      return next;
+    });
     try { await invoke('openvino_download_model', { modelId: id }); }
     catch (downloadError) { toast.error('Could not download OpenVINO model', { description: String(downloadError) }); }
   };
 
   const remove = async (id: string) => {
-    try { await invoke('openvino_delete_model', { modelId: id }); void refresh(); }
+    try {
+      await invoke('openvino_delete_model', { modelId: id });
+      setSelectionErrors((current) => {
+        const next = { ...current };
+        delete next[id];
+        return next;
+      });
+      void refresh();
+    }
     catch (deleteError) { toast.error('Could not delete OpenVINO model', { description: String(deleteError) }); }
   };
 
@@ -166,8 +189,11 @@ export function OpenVinoWhisperModelManager({ selectedModel, onModelSelect, clas
         const modelSize = formatBytes(totalBytes);
         const progressSize = downloadedBytes === undefined ? null : `${formatBytes(downloadedBytes)}${modelSize ? ` / ${modelSize}` : ''}`;
         const modelName = model.displayName ?? fallbackModelNames[model.id] ?? model.id;
+        const selectionError = selectionErrors[model.id];
         const status = isSelecting
           ? { label: 'Preparing NPU', dotClassName: 'bg-blue-500', textClassName: 'text-blue-700' }
+          : selectionError
+          ? { label: 'NPU failed', dotClassName: 'bg-red-500', textClassName: 'text-red-700' }
           : state === 'ready'
           ? { label: 'Installed', dotClassName: 'bg-green-500', textClassName: 'text-green-600' }
           : state === 'downloading' || state === 'validating'
@@ -189,8 +215,9 @@ export function OpenVinoWhisperModelManager({ selectedModel, onModelSelect, clas
               </div>
               <p className="ml-7 mt-1 text-sm text-gray-600">Multilingual Whisper model for local Intel NPU transcription.</p>
               {modelSize ? <p className="ml-7 mt-2 flex items-center gap-1.5 text-sm text-gray-600"><HardDrive className="h-4 w-4" aria-hidden="true" />{modelSize}</p> : null}
-              <p className="mt-1 text-xs text-gray-500">{isSelecting ? `Preparing model on the NPU… ${selectionElapsedSeconds}s elapsed. The first compilation can take several minutes.` : event?.message ?? (state === 'ready' ? 'Model files verified. NPU loading is checked on selection.' : state)}</p>
+              <p className="mt-1 text-xs text-gray-500">{isSelecting ? `Preparing model on the NPU... ${selectionElapsedSeconds}s elapsed. Initial compilation can take several minutes, up to 10 minutes.` : event?.message ?? (state === 'ready' ? 'Model files verified. NPU loading is checked on selection.' : state)}</p>
               {model.reason ? <p className="text-xs text-red-700">{model.reason}</p> : null}
+              {selectionError ? <div className="ml-7 mt-2 rounded border border-red-200 bg-red-50 p-2 text-sm text-red-800" role="alert"><p className="font-medium">NPU preparation failed</p><p className="mt-1 break-words">{selectionError}</p><p className="mt-1 text-xs">The previous selection is saved and will reload when needed. Use Select or Check NPU to retry.</p></div> : null}
             </div>
 
             <div className="flex shrink-0 flex-col items-end gap-2">
