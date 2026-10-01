@@ -3,8 +3,13 @@
 #include "whisper_engine.hpp"
 
 #include <algorithm>
+#include <cerrno>
 #include <chrono>
+#include <cstdio>
+#include <cstring>
 #include <exception>
+#include <fcntl.h>
+#include <io.h>
 #include <iostream>
 #include <utility>
 
@@ -26,9 +31,24 @@ std::string classify_exception(const std::exception& e) {
     if (message.find("model directory") != std::string::npos || message.find("MODEL_NOT_FOUND") != std::string::npos) return "MODEL_NOT_FOUND";
     return "NPU_COMPILE_FAILED";
 }
+
+bool configure_binary_pipes() {
+    if (_setmode(_fileno(stdin), _O_BINARY) == -1) {
+        std::cerr << "openvino-whisper-helper: cannot configure stdin for binary IPC: " << std::strerror(errno) << '\n';
+        return false;
+    }
+    if (_setmode(_fileno(stdout), _O_BINARY) == -1) {
+        std::cerr << "openvino-whisper-helper: cannot configure stdout for binary IPC: " << std::strerror(errno) << '\n';
+        return false;
+    }
+    return true;
+}
 } // namespace
 
 int main() {
+    // The protocol contains raw PCM payloads. Windows text mode recognizes
+    // Ctrl+Z as EOF and translates line endings, which corrupts that payload.
+    if (!configure_binary_pipes()) return 4;
     std::ios::sync_with_stdio(false);
     mw::WhisperEngine engine;
     for (;;) {

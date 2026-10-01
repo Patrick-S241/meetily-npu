@@ -755,6 +755,8 @@ jobs:
           foreach ($dll in $forbidden) {
             if (Test-Path -LiteralPath (Join-Path $runtimeDir $dll)) { throw "Unexpected fallback plugin in NPU bundle: $dll" }
           }
+          python openvino-whisper-helper/tests/ipc_binary_integration.py $helper $runtimeDir
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
       - name: Cache FFmpeg binary
         uses: actions/cache@v4
         with:

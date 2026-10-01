@@ -63,14 +63,14 @@ export function useTranscriptionModels(transcriptModelConfig: TranscriptModelCon
 
     // Fetch OpenVINO Whisper models. The backend keeps these separate from GGML Whisper files.
     try {
-      const openvinoModels = await invoke<Array<{ id: string; displayName?: string; ready?: boolean }>>('openvino_list_models');
+      const openvinoModels = await invoke<Array<{ id: string; displayName?: string; ready?: boolean; totalBytes?: number }>>('openvino_list_models');
       allModels.push(...openvinoModels
         .filter((m) => m.ready)
         .map((m) => ({
           provider: 'openvinoWhisper' as const,
           name: m.id,
           displayName: 'Intel NPU: ' + (m.displayName || m.id),
-          size_mb: 0,
+          size_mb: (m.totalBytes ?? 0) / (1024 * 1024),
         })));
     } catch (err) {
       console.error('Failed to fetch OpenVINO Whisper models:', err);

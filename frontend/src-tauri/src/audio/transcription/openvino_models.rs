@@ -129,7 +129,8 @@ pub async fn openvino_list_models<R: Runtime>(app: AppHandle<R>) -> Result<Vec<M
     for model in catalogue()?.models {
         let model_path = path(&app, &model)?; let installed = model_path.exists();
         let checked = if installed { ensure_ready(&app, &model.id).await } else { Err("Not downloaded".into()) };
-        result.push(ModelInfo { id:model.id, display_name:model.display_name, revision:model.revision, language:model.language, installed, ready:checked.is_ok(), total_bytes:None, downloaded_bytes:installed.then(||bytes(&model_path)), reason:checked.err() });
+        let total_bytes = model.files.iter().map(|file| file.size).sum();
+        result.push(ModelInfo { id:model.id, display_name:model.display_name, revision:model.revision, language:model.language, installed, ready:checked.is_ok(), total_bytes:Some(total_bytes), downloaded_bytes:installed.then(||bytes(&model_path)), reason:checked.err() });
     }
     Ok(result)
 }
